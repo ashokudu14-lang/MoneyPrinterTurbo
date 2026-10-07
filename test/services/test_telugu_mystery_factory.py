@@ -32,7 +32,8 @@ def test_scene_prompts_are_five_continuity_locked_ten_second_clips():
     assert all("EXACT ENDING FRAME" in prompt for prompt in prompts)
     assert all("NEXT-SCENE TRANSITION ANCHOR" in prompt for prompt in prompts)
     assert "same dark rectangular Kuldhara sandstone doorway" in prompts[1]
-    assert "centered lamp wick/flame" in prompts[2]
+    assert "centered lamp wick/flame" in prompts[1]
+    assert "same clay lamp, centered wick" in prompts[2]
     assert "same footprints" in prompts[3]
     assert "already rising and moving forward" in prompts[4]
 
