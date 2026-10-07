@@ -27,6 +27,14 @@ def test_scene_prompts_are_five_continuity_locked_ten_second_clips():
     assert all("VISUALS ONLY" in prompt for prompt in prompts)
     assert all("Do not create narration/BGM/SFX" in prompt for prompt in prompts)
     assert "same upward crane/drone rise" in prompts[-1]
+    assert all("EXACT OPENING FRAME" in prompt for prompt in prompts)
+    assert all("10-SECOND TIMELINE" in prompt for prompt in prompts)
+    assert all("EXACT ENDING FRAME" in prompt for prompt in prompts)
+    assert all("NEXT-SCENE TRANSITION ANCHOR" in prompt for prompt in prompts)
+    assert "same dark rectangular Kuldhara sandstone doorway" in prompts[1]
+    assert "centered lamp wick/flame" in prompts[2]
+    assert "same footprints" in prompts[3]
+    assert "already rising and moving forward" in prompts[4]
 
 
 def test_build_plan_with_existing_narration_does_not_need_llm():
