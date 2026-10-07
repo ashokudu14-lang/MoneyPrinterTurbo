@@ -12,6 +12,7 @@ if str(root_dir) not in sys.path:
     sys.path.insert(0, str(root_dir))
 
 from app.models.schema import MaterialInfo, VideoParams
+from app.services import bgm as bgm_service
 from app.services import material_upload as material_upload_service
 from app.services import state as sm
 from app.services import webui_task
@@ -198,6 +199,7 @@ if plan:
             "Background music",
             [
                 "None (safest until licensed AI music is configured)",
+                "Upload one continuous BGM track (no API key)",
                 "Sonilo AI",
                 "ElevenLabs AI",
                 "Random bundled music (copyright check required)",
@@ -207,13 +209,32 @@ if plan:
 
     bgm_type = {
         "None (safest until licensed AI music is configured)": "",
+        "Upload one continuous BGM track (no API key)": "custom",
         "Sonilo AI": "sonilo",
         "ElevenLabs AI": "elevenlabs",
         "Random bundled music (copyright check required)": "random",
     }[bgm_choice]
+    bgm_upload = None
+    if bgm_type == "custom":
+        bgm_upload = st.file_uploader(
+            "Upload one continuous background track",
+            type=[extension.removeprefix(".") for extension in bgm_service.SUPPORTED_BGM_EXTENSIONS],
+            accept_multiple_files=False,
+            key="telugu_mystery_bgm_upload",
+            max_upload_size=bgm_service.MAX_BGM_UPLOAD_BYTES // (1024 * 1024),
+            help="Use the prepared 50-second BGM + wind track. The upload is validated before rendering.",
+        )
+        if bgm_upload is not None:
+            st.audio(bgm_upload)
+        else:
+            st.info("Select one continuous BGM track before rendering.")
+
+    bgm_volume = st.slider("BGM volume (leave narration clear)", 0.05, 0.30, 0.15, 0.01)
     st.text_area("AI music prompt", value=BGM_PROMPT, height=110, disabled=True)
 
-    ready = bool(uploads and len(uploads) == 5)
+    ready = bool(
+        uploads and len(uploads) == 5 and (bgm_type != "custom" or bgm_upload is not None)
+    )
     if st.button(
         "🚀 Assemble final Telugu Short",
         type="primary",
@@ -232,6 +253,13 @@ if plan:
                     MaterialInfo(provider="local", url=file_path, duration=10)
                     for file_path in material_paths
                 ]
+                bgm_file = ""
+                if bgm_type == "custom":
+                    if bgm_upload is None:
+                        raise ValueError("Upload one continuous BGM track first.")
+                    bgm_file = bgm_service.save_bgm_upload(
+                        bgm_upload.name, bgm_upload
+                    )
                 params = VideoParams(
                     video_subject=plan.topic,
                     video_script=plan.narration,
@@ -250,7 +278,8 @@ if plan:
                     voice_volume=1.0,
                     voice_rate=voice_rate,
                     bgm_type=bgm_type,
-                    bgm_volume=0.15,
+                    bgm_file=bgm_file,
+                    bgm_volume=bgm_volume,
                     video_music_prompt=plan.bgm_prompt,
                     subtitle_enabled=subtitle_enabled,
                     subtitle_position="bottom",
