@@ -98,6 +98,39 @@ KULDHARA_SCENE_NOTES = [
     "Continue the same rising camera over Kuldhara; reveal the scale of the abandoned sandstone settlement surrounded by desert; finish on a grounded documentary-wide view.",
 ]
 
+KULDHARA_CLIP_CONTINUITY = [
+    (
+        "Exact opening frame: a shoulder-height 35mm view moving forward down a narrow, empty lane of authentic Kuldhara sandstone ruins at late sunset. The dark, distinctive sandstone doorway is already visible straight ahead.",
+        "0–2s: immediate forward move through the empty lane, wind lifting a thin veil of sand. 2–5s: pass close to cracked honey-gold sandstone walls and one weathered carved lintel. 5–8s: the camera centers the same dark rectangular doorway; no people, signs, lights or modern objects. 8–10s: continue the push until the doorway fills frame and the lens crosses its threshold.",
+        "Exact ending frame: camera halfway through the dark sandstone doorway, same forward motion, warm sunset edge light behind and cool shadow inside.",
+        "Next-scene anchor: this exact dark doorway and forward camera movement; Scene 2 must begin at this threshold and continue inside.",
+    ),
+    (
+        "Exact opening frame: match Scene 1's final frame—the same dark rectangular Kuldhara sandstone doorway, same shoulder-height 35mm lens, same forward movement crossing into the dim interior at late sunset.",
+        "0–2s: finish crossing the threshold without a cut in direction. 2–5s: reveal one small, empty sandstone room with rough walls and dust in the same amber edge light. 5–8s: drift past a single old clay oil lamp on a low stone ledge; no other props are introduced. 8–10s: push into a close-up of the lamp and its small natural flame.",
+        "Exact ending frame: tight close-up of the clay oil lamp wick and steady flame, the wick centered, shallow depth of field, no visible people.",
+        "Next-scene anchor: the centered lamp wick/flame; Scene 3 must open on the same composition and match-cut from this lamp into a clearly illustrative historical reconstruction.",
+    ),
+    (
+        "Exact opening frame: reproduce Scene 2's final close-up—the same clay lamp, centered wick and small flame, same warm light and shallow focus. No new location or prop appears in the first frame.",
+        "0–2s: hold the same lamp composition, then use a motivated match cut from its flame to a practical oil lamp in an early-19th-century Kuldhara home. 2–5s: reveal a historically restrained, clearly illustrative reconstruction of Paliwal Brahmin families in period-appropriate earth-tone Rajasthani clothing preparing small cloth bundles at dusk. 5–8s: follow them quietly along a sandstone lane; do not depict the disputed minister story as fact. 8–10s: tilt down to their fresh footprints in desert sand, ending with footprints filling the lower center of frame.",
+        "Exact ending frame: close view of several fresh footprints crossing fine desert sand, low camera, the last footprint centered, a light breeze just beginning to move grains.",
+        "Next-scene anchor: these exact footprints, their direction and low camera height; Scene 4 must start on the same prints as wind begins covering them.",
+    ),
+    (
+        "Exact opening frame: match Scene 3's final frame—the same footprints crossing fine sand, same low camera height and direction. Wind is already moving a few grains across the centered print.",
+        "0–2s: continue the same footprints while wind gradually softens their edges. 2–4s: let blowing sand fill the frame for a natural match transition. 4–7s: reveal the present-day Kuldhara lane at the same late-sunset-to-blue-hour moment, with the same sandstone ruins, haze and color grade; no ghosts or people. 7–10s: begin a slow, physically plausible crane rise above the lane, moving forward in the same direction; stop before the full village is revealed.",
+        "Exact ending frame: camera has risen only a little above the lane and is still moving upward and forward; the Kuldhara roofs and ruin walls are beginning to drop lower in frame.",
+        "Next-scene anchor: the same upward-and-forward crane movement, heading and dusk sky; Scene 5 must begin mid-rise without restarting or changing lens direction.",
+    ),
+    (
+        "Exact opening frame: continue Scene 4's final image and motion—the same low aerial/crane position over Kuldhara, already rising and moving forward, same 24mm lens, same late-sunset blue-hour sky and dust haze.",
+        "0–2s: continue the rise without a jump in height or direction. 2–5s: clear the roofline and reveal more of the authentic sandstone settlement in one continuous move. 5–8s: widen to show the abandoned village and surrounding Thar Desert, grounded in real geography and natural scale. 8–10s: settle into a memorable documentary-wide composition with subtle camera drift and uncluttered sky/ground for an editor-added Telugu question.",
+        "Exact ending frame: wide, photorealistic view of Kuldhara's sandstone ruins against the desert at dusk; camera still drifting gently, no fade to black, no text.",
+        "Final handoff: hold this same wide reveal with clean visual space for the editor's final question/CTA caption; there is no next clip.",
+    ),
+]
+
 TELUGU_FONT_CANDIDATES = (
     "NotoSansTelugu-Bold.ttf",
     "NotoSansTelugu-Regular.ttf",
@@ -217,9 +250,17 @@ def build_scene_prompts(topic: str, narration_parts: Iterable[str]) -> list[str]
 
     notes = _scene_notes(topic)
     prompts = []
+    kuldhara = "kuldhara" in topic.casefold() or "కుల్ధర" in topic
     for index, (narration, note, bridge) in enumerate(
         zip(parts, notes, FLOW_BRIDGES), start=1
     ):
+        if kuldhara:
+            opening, timeline, ending, next_anchor = KULDHARA_CLIP_CONTINUITY[index - 1]
+        else:
+            opening = "Exact opening frame: begin on the visual anchor described for this story and continue the previous scene's camera direction, lens height, time of day, color grade and weather."
+            timeline = "0–2s: establish the immediate story detail. 2–5s: move closer with one motivated camera move. 5–8s: reveal the next factual visual clue. 8–10s: finish on the stated continuity anchor, with motion still motivated."
+            ending = "Exact ending frame: a clear, physically plausible view of the scene-specific story anchor, with no text and no fade."
+            next_anchor = "Next-scene anchor: preserve this exact object/composition and the same camera direction as the next clip's first frame."
         prompts.append(
             f"""GOOGLE FLOW CLIP {index}/5 — EXACTLY 10 SECONDS
 
@@ -233,6 +274,18 @@ THE NARRATION THAT WILL PLAY OVER THIS CLIP IN THE FINAL EDIT (DO NOT GENERATE I
 
 SCENE-SPECIFIC VISUAL DIRECTION:
 {note}
+
+EXACT OPENING FRAME:
+{opening}
+
+10-SECOND TIMELINE:
+{timeline}
+
+EXACT ENDING FRAME:
+{ending}
+
+NEXT-SCENE TRANSITION ANCHOR:
+{next_anchor}
 
 CONTINUITY BRIDGE:
 {bridge}

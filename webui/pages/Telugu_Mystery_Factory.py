@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from uuid import uuid4
 
 import streamlit as st
 
 root_dir = Path(__file__).resolve().parents[2]
+if str(root_dir) not in sys.path:
+    sys.path.insert(0, str(root_dir))
 
 from app.models.schema import MaterialInfo, VideoParams
 from app.services import material_upload as material_upload_service
@@ -22,7 +25,19 @@ from app.services.telugu_mystery_factory import (
     strip_video_audio,
 )
 
-st.set_page_config(page_title="Telugu Mystery Factory", page_icon="🎬", layout="wide")
+st.set_page_config(page_title="Telugu Mystery Factory", page_icon="🎬", layout="centered")
+st.markdown(
+    """<style>
+    @media (max-width: 700px) {
+      .stMainBlockContainer { padding-left: 1rem !important; padding-right: 1rem !important; }
+      [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; gap: .5rem !important; }
+      [data-testid="column"] { min-width: 100% !important; flex: 1 1 100% !important; }
+      [data-testid="stButton"] button, [data-testid="stDownloadButton"] button { min-height: 2.8rem; }
+      textarea, input { font-size: 16px !important; }
+    }
+    </style>""",
+    unsafe_allow_html=True,
+)
 st.title("🎬 Telugu Mystery Shorts Factory")
 st.caption(
     "Google Flow visuals → one continuous Telugu voice/BGM/subtitle mix in MoneyPrinterTurbo"
