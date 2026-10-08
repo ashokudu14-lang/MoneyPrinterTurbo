@@ -948,6 +948,79 @@ def _fit_clip_to_canvas(
     ).with_duration(clip.duration)
 
 
+def _transcode_video_clip_with_ffmpeg(
+    source_path: str,
+    output_path: str,
+    *,
+    start_time: float,
+    duration: float,
+    target_width: int,
+    target_height: int,
+    fit_mode: VideoFitMode | str,
+    fps: float,
+) -> str:
+    """Crop/scale one clip with FFmpeg instead of allocating 1080p frames in Python."""
+    target_width = int(target_width)
+    target_height = int(target_height)
+    if VideoFitMode(fit_mode) == VideoFitMode.cover:
+        video_filter = (
+            f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase,"
+            f"crop={target_width}:{target_height}"
+        )
+    else:
+        video_filter = (
+            f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
+            f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:color=black"
+        )
+
+    command = [
+        utils.get_ffmpeg_binary(),
+        "-y",
+        "-nostdin",
+        "-v",
+        "error",
+        "-i",
+        source_path,
+        "-ss",
+        f"{max(0.0, float(start_time)):.6f}",
+        "-t",
+        f"{max(0.001, float(duration)):.6f}",
+        "-map",
+        "0:v:0",
+        "-vf",
+        video_filter,
+        "-r",
+        str(fps),
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+        "-threads",
+        "1",
+        "-filter_threads",
+        "1",
+        "-movflags",
+        "+faststart",
+        output_path,
+    ]
+    completed = subprocess.run(
+        command, capture_output=True, check=False, timeout=300
+    )
+    if (
+        completed.returncode != 0
+        or not os.path.isfile(output_path)
+        or os.path.getsize(output_path) == 0
+    ):
+        detail = completed.stderr.decode("utf-8", errors="replace")[-1000:]
+        raise RuntimeError(f"FFmpeg could not normalize video clip: {detail}")
+    return output_path
+
+
 def combine_videos(
     combined_video_path: str,
     video_paths: List[str],
@@ -1072,6 +1145,43 @@ def combine_videos(
                 f"processing clip {index + 1}: {subclipped_item.width}x{subclipped_item.height}, "
                 f"source: {os.path.basename(subclipped_item.source_file_path)}"
             )
+            if transition_value is None and normalized_clip_speed == 1.0:
+                fast_duration = min(
+                    max_clip_duration,
+                    subclipped_item.end_time - subclipped_item.start_time,
+                )
+                with tempfile.NamedTemporaryFile(
+                    dir=output_dir or ".",
+                    prefix="temp-clip-",
+                    suffix=".mp4",
+                    delete=False,
+                ) as temporary_clip:
+                    clip_file = temporary_clip.name
+                try:
+                    _transcode_video_clip_with_ffmpeg(
+                        source_path=subclipped_item.file_path,
+                        output_path=clip_file,
+                        start_time=subclipped_item.start_time,
+                        duration=fast_duration,
+                        target_width=video_width,
+                        target_height=video_height,
+                        fit_mode=fit_mode,
+                        fps=fps,
+                    )
+                    clip_file = None
+                    return SubClippedVideoClip(
+                        file_path=clip_file,
+                        duration=fast_duration,
+                        width=video_width,
+                        height=video_height,
+                        source_file_path=subclipped_item.source_file_path,
+                    )
+                except Exception as exc:
+                    delete_files(clip_file)
+                    clip_file = None
+                    logger.warning(
+                        f"FFmpeg clip normalization failed; using MoviePy fallback: {exc}"
+                    )
             source_clip = _open_video_clip_quietly(subclipped_item.file_path)
             clip = source_clip.subclipped(
                 subclipped_item.start_time, subclipped_item.end_time
