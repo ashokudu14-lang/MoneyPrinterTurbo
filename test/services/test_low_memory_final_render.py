@@ -67,7 +67,8 @@ class TestLowMemoryFinalRender(unittest.TestCase):
             command = run.call_args.args[0]
             graph = command[command.index("-filter_complex") + 1]
             self.assertIn("subtitles=", graph)
-            self.assertIn("FontSize=54", graph)
+            self.assertIn("FontSize=19", graph)
+            self.assertIn("MarginV=14", graph)
             self.assertIn("amix=inputs=2", graph)
             self.assertIn("-threads:v", command)
             self.assertTrue(paths["output"].is_file())
