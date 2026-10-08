@@ -2162,6 +2162,59 @@ class TestFFmpegVideoClipTranscode(unittest.TestCase):
                 self.assertIsNone(clip.audio)
                 self.assertAlmostEqual(clip.duration, 0.5, delta=0.1)
 
+    def test_concatenates_normalized_clips_without_reencoding(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = os.path.join(temp_dir, "source.mp4")
+            subprocess.run(
+                [
+                    utils.get_ffmpeg_binary(),
+                    "-y",
+                    "-nostdin",
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:s=360x640:r=24:d=0.5",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    source_path,
+                ],
+                check=True,
+                timeout=60,
+            )
+            clip_paths = []
+            for index in range(2):
+                output_path = os.path.join(temp_dir, f"normalized-{index}.mp4")
+                vd._transcode_video_clip_with_ffmpeg(
+                    source_path,
+                    output_path,
+                    start_time=0,
+                    duration=0.5,
+                    target_width=480,
+                    target_height=854,
+                    fit_mode="cover",
+                    fps=24,
+                )
+                clip_paths.append(output_path)
+
+            joined_path = os.path.join(temp_dir, "joined.mp4")
+            vd.concat_video_clips_with_ffmpeg(
+                clip_files=clip_paths,
+                output_file=joined_path,
+                threads=1,
+                output_dir=temp_dir,
+                max_duration=0.8,
+                copy_video=True,
+            )
+
+            with VideoFileClip(joined_path) as clip:
+                self.assertEqual(tuple(clip.size), (480, 854))
+                self.assertIsNone(clip.audio)
+                self.assertAlmostEqual(clip.duration, 0.8, delta=0.1)
+
 
 if __name__ == "__main__":
     unittest.main()
