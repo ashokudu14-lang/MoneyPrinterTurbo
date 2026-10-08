@@ -376,7 +376,11 @@ def strip_video_audio(source_path: str, output_path: str) -> str:
         output_path,
     ]
     completed = subprocess.run(command, capture_output=True, check=False, timeout=240)
-    if completed.returncode != 0 or not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+    if (
+        completed.returncode != 0
+        or not os.path.isfile(output_path)
+        or os.path.getsize(output_path) == 0
+    ):
         detail = completed.stderr.decode("utf-8", errors="replace")[-1000:]
         raise RuntimeError(f"Could not prepare Flow clip for rendering: {detail}")
     return output_path
