@@ -1,9 +1,15 @@
+import subprocess
+
+from moviepy import VideoFileClip
+
+from app.utils import utils
 from app.services.telugu_mystery_factory import (
     BGM_PROMPT,
     MASTER_VISUAL_BIBLE,
     build_plan,
     build_scene_prompts,
     split_into_five,
+    strip_video_audio,
 )
 
 
@@ -36,6 +42,44 @@ def test_scene_prompts_are_five_continuity_locked_ten_second_clips():
     assert "same clay lamp, centered wick" in prompts[2]
     assert "same footprints" in prompts[3]
     assert "already rising and moving forward" in prompts[4]
+
+
+def test_strip_video_audio_upscales_360p_flow_clip(tmp_path):
+    source_path = tmp_path / "flow-360p.mp4"
+    output_path = tmp_path / "flow-360p-video-only.mp4"
+    subprocess.run(
+        [
+            utils.get_ffmpeg_binary(),
+            "-y",
+            "-nostdin",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=360x640:r=24:d=0.5",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=44100:duration=0.5",
+            "-shortest",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            str(source_path),
+        ],
+        check=True,
+        timeout=60,
+    )
+
+    strip_video_audio(str(source_path), str(output_path))
+
+    with VideoFileClip(str(output_path)) as clip:
+        assert min(clip.size) >= 480
+        assert clip.audio is None
 
 
 def test_build_plan_with_existing_narration_does_not_need_llm():
