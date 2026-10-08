@@ -1706,10 +1706,10 @@ def _try_generate_video_with_low_memory_ffmpeg(
             + "':fontsdir='"
             + escape_filter_path(os.path.dirname(os.path.abspath(font_path)))
             + "':force_style='FontName=Noto Sans Telugu,FontSize="
-            + str(int(params.font_size))
+            + str(max(1, int(round(params.font_size * 384 / 1080))))
             + ",PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline="
-            + str(max(0, int(round(params.stroke_width))))
-            + ",Shadow=0,Alignment=2,MarginV=96'"
+            + str(max(0, int(round(params.stroke_width * 384 / 1080))))
+            + ",Shadow=0,Alignment=2,MarginV=14'"
         )
         command = [
             ffmpeg_binary,
