@@ -2,6 +2,8 @@ import subprocess
 
 from moviepy import VideoFileClip
 
+from app.services import freevideo_backend
+from app.services.freevideo_backend import FreeVideoSettings, adapt_prompt_for_freevideo
 from app.utils import utils
 from app.services.telugu_mystery_factory import (
     BGM_PROMPT,
@@ -102,3 +104,63 @@ def test_build_plan_with_existing_narration_does_not_need_llm():
     assert plan.clip_seconds == 10
     assert plan.master_visual_bible == MASTER_VISUAL_BIBLE
     assert plan.bgm_prompt == BGM_PROMPT
+
+
+def test_freevideo_prompt_adapter_removes_flow_specific_heading():
+    prompt = "GOOGLE FLOW CLIP 1/5\nGOOGLE FLOW AUDIO POLICY: visuals only in Flow"
+    adapted = adapt_prompt_for_freevideo(prompt)
+
+    assert "FREEVIDEO CLIP 1/5" in adapted
+    assert "FREEVIDEO AUDIO POLICY" in adapted
+    assert "in the generated clip" in adapted
+    assert "GOOGLE FLOW" not in adapted
+
+
+def test_remote_freevideo_generation_writes_returned_video(monkeypatch, tmp_path):
+    class FakeResponse:
+        status_code = 200
+        content = b"fake-mp4-bytes"
+        text = ""
+
+    captured = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured.update(
+            url=url,
+            headers=headers,
+            json=json,
+            timeout=timeout,
+        )
+        return FakeResponse()
+
+    monkeypatch.setattr(freevideo_backend.requests, "post", fake_post)
+    settings = FreeVideoSettings(
+        mode="remote",
+        base_url="https://gpu.example.test",
+        api_token="secret-token",
+        cli="",
+        root="",
+        timeout_seconds=123,
+    )
+    output = tmp_path / "scene.mp4"
+
+    result = freevideo_backend.generate_freevideo_clip(
+        "GOOGLE FLOW CLIP 1/5\nA cinematic Indian village",
+        output,
+        width=768,
+        height=1344,
+        seconds=10,
+        seed=42,
+        settings=settings,
+    )
+
+    assert result == str(output)
+    assert output.read_bytes() == b"fake-mp4-bytes"
+    assert captured["url"] == "https://gpu.example.test/generate"
+    assert captured["headers"] == {"Authorization": "Bearer secret-token"}
+    assert captured["timeout"] == 123
+    assert captured["json"]["width"] == 768
+    assert captured["json"]["height"] == 1344
+    assert captured["json"]["seconds"] == 10
+    assert captured["json"]["seed"] == 42
+    assert "FREEVIDEO CLIP 1/5" in captured["json"]["prompt"]
