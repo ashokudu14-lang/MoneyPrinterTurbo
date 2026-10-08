@@ -16,6 +16,10 @@ from app.services import bgm as bgm_service
 from app.services import material_upload as material_upload_service
 from app.services import state as sm
 from app.services import webui_task
+from app.services.freevideo_backend import (
+    freevideo_status,
+    generate_freevideo_clips,
+)
 from app.services.telugu_mystery_factory import (
     BGM_PROMPT,
     MysteryPlan,
@@ -41,7 +45,7 @@ st.markdown(
 )
 st.title("🎬 Telugu Mystery Shorts Factory")
 st.caption(
-    "Google Flow visuals → one continuous Telugu voice/BGM/subtitle mix in MoneyPrinterTurbo"
+    "FreeVideo or Google Flow visuals → one continuous Telugu voice/BGM/subtitle mix in MoneyPrinterTurbo"
 )
 
 KULDHARA_DEFAULT_NARRATION = """రాజస్థాన్‌లో జైసల్మేర్‌కు దగ్గరగా ఉన్న కుల్ధారా—ఇప్పుడు నిశ్శబ్దంగా కనిపించే శిథిల గ్రామం. కానీ ఈ ఖాళీ ఇళ్లకంటే, ఊరంతా ఎందుకు వెళ్లిపోయిందన్న ప్రశ్నే ఎక్కువ ఆసక్తి రేపుతుంది.
@@ -82,14 +86,24 @@ def _save_uploaded_clip(uploaded_file, index: int) -> str:
     return muted_path
 
 
+def _prepare_generated_clip(source_path: str, index: int) -> str:
+    output_name = f"freevideo-scene-{index}-{uuid4().hex}.mp4"
+    output_path = os.path.join(
+        material_upload_service.uploaded_material_dir(), output_name
+    )
+    strip_video_audio(source_path, output_path)
+    return output_path
+
+
 with st.sidebar:
     st.subheader("Channel preset")
     st.markdown("**Niche:** Indian mysteries & strange true history")
     st.markdown("**Language:** Telugu (India)")
     st.markdown("**Default narrator:** `te-IN-MohanNeural`")
-    st.markdown("**Format:** 9:16 · 5 × 10-second Flow clips")
+    st.markdown("**Format:** 9:16 · 5 × 10-second clips")
     st.info(
-        "Flow is used for visuals only. The final audio is generated once across the complete Short."
+        "Visuals can be generated automatically with FreeVideo or uploaded from Google Flow. "
+        "The final audio is generated once across the complete Short."
     )
 
 col_left, col_right = st.columns([1, 1])
@@ -105,7 +119,7 @@ with col_right:
     st.write("")
     st.write("")
     generate_clicked = st.button(
-        "✨ Generate Telugu story + 5 Flow prompts",
+        "✨ Generate Telugu story + 5 scene prompts",
         type="primary",
         use_container_width=True,
     )
@@ -130,8 +144,9 @@ if generate_clicked:
             if plan is not None:
                 st.session_state["telugu_mystery_topic"] = topic.strip()
                 st.session_state["telugu_mystery_plan"] = plan
+                st.session_state.pop("telugu_freevideo_paths", None)
                 st.success(
-                    "Plan ready. Generate the five visuals in Google Flow using the prompts below."
+                    "Plan ready. Choose FreeVideo for automatic generation or Google Flow for manual generation."
                 )
 
 plan = _get_plan()
@@ -148,6 +163,7 @@ if plan:
         try:
             plan = build_plan(plan.topic, narration=edited_narration)
             st.session_state["telugu_mystery_plan"] = plan
+            st.session_state.pop("telugu_freevideo_paths", None)
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
@@ -155,9 +171,9 @@ if plan:
     download_a, download_b = st.columns(2)
     with download_a:
         st.download_button(
-            "⬇️ Download all Flow prompts (.txt)",
+            "⬇️ Download all scene prompts (.txt)",
             data=flow_prompt_text(plan).encode("utf-8"),
-            file_name="telugu-mystery-flow-prompts.txt",
+            file_name="telugu-mystery-scene-prompts.txt",
             mime="text/plain",
             use_container_width=True,
         )
@@ -170,26 +186,100 @@ if plan:
             use_container_width=True,
         )
 
-    st.subheader("2. Generate these 5 clips in Google Flow")
-    st.caption(
-        "Generate each clip separately. Download the best result for each scene. Do not add speech/music in Flow."
+    st.subheader("2. Visual generation")
+    visual_source = st.radio(
+        "Choose how to create the five 10-second clips",
+        ["FreeVideo (automatic)", "Google Flow (manual upload)"],
+        horizontal=True,
+        key="telugu_visual_source",
     )
-    for index, prompt in enumerate(plan.flow_prompts, start=1):
-        with st.expander(
-            f"Flow Scene {index}/5 — 10 seconds", expanded=(index == 1)
-        ):
-            st.code(prompt, language=None)
 
-    st.divider()
-    st.subheader("3. Upload the 5 Flow clips")
-    uploads = st.file_uploader(
-        "Select exactly five clips in Scene 1 → Scene 5 order",
-        type=["mp4", "mov", "mkv", "webm", "avi", "flv"],
-        accept_multiple_files=True,
-        key="telugu_flow_uploads",
-    )
-    if uploads and len(uploads) != 5:
-        st.warning(f"You selected {len(uploads)} files. Select exactly 5 clips.")
+    material_paths: list[str] = []
+    uploads = []
+
+    if visual_source == "FreeVideo (automatic)":
+        status = freevideo_status()
+        if status.get("ready"):
+            st.success(f"FreeVideo {status.get('mode')} backend is ready. {status.get('detail', '')}")
+        else:
+            st.warning(
+                "FreeVideo is not connected yet. " + str(status.get("detail", ""))
+            )
+            st.caption(
+                "On Render, set FREEVIDEO_BASE_URL to your GPU worker. If MoneyPrinterTurbo runs on the GPU machine, set FREEVIDEO_ROOT or FREEVIDEO_CLI instead."
+            )
+
+        with st.expander("Review the 5 FreeVideo prompts", expanded=False):
+            for index, prompt in enumerate(plan.flow_prompts, start=1):
+                st.markdown(f"**Scene {index}/5**")
+                st.code(prompt, language=None)
+
+        if st.button(
+            "⚡ Generate all 5 clips with FreeVideo",
+            type="primary",
+            disabled=not bool(status.get("ready")),
+            use_container_width=True,
+        ):
+            progress_bar = st.progress(0)
+            progress_text = st.empty()
+
+            def _progress(index: int, total: int, message: str) -> None:
+                progress_text.write(message)
+                progress_bar.progress(max(0.0, min(1.0, (index - 1) / total)))
+
+            generation_dir = Path(material_upload_service.uploaded_material_dir()) / (
+                f"freevideo-{uuid4().hex}"
+            )
+            try:
+                generated_paths = generate_freevideo_clips(
+                    plan.flow_prompts,
+                    generation_dir,
+                    width=768,
+                    height=1344,
+                    seconds=10.0,
+                    progress=_progress,
+                )
+                progress_bar.progress(1.0)
+                progress_text.write("FreeVideo generation complete.")
+                st.session_state["telugu_freevideo_paths"] = generated_paths
+                st.success("Generated all five FreeVideo clips.")
+            except Exception as exc:
+                st.error(f"FreeVideo generation failed: {exc}")
+
+        generated_paths = st.session_state.get("telugu_freevideo_paths") or []
+        valid_generated_paths = [
+            path for path in generated_paths if path and os.path.isfile(path)
+        ]
+        if valid_generated_paths:
+            st.markdown("**Generated clips**")
+            for index, path in enumerate(valid_generated_paths, start=1):
+                st.caption(f"Scene {index}/5")
+                st.video(path)
+            if len(valid_generated_paths) == 5:
+                material_paths = valid_generated_paths
+            else:
+                st.warning(
+                    f"Only {len(valid_generated_paths)}/5 generated clips are currently available. Generate the set again."
+                )
+    else:
+        st.caption(
+            "Generate each clip separately in Google Flow, download the best result for each scene, then upload them below. Do not add speech/music in Flow."
+        )
+        for index, prompt in enumerate(plan.flow_prompts, start=1):
+            with st.expander(
+                f"Flow Scene {index}/5 — 10 seconds", expanded=(index == 1)
+            ):
+                st.code(prompt, language=None)
+
+        st.subheader("3. Upload the 5 Flow clips")
+        uploads = st.file_uploader(
+            "Select exactly five clips in Scene 1 → Scene 5 order",
+            type=["mp4", "mov", "mkv", "webm", "avi", "flv"],
+            accept_multiple_files=True,
+            key="telugu_flow_uploads",
+        )
+        if uploads and len(uploads) != 5:
+            st.warning(f"You selected {len(uploads)} files. Select exactly 5 clips.")
 
     font_name = find_telugu_font(font_dir)
     subtitle_enabled = font_name is not None
@@ -250,8 +340,13 @@ if plan:
     bgm_volume = st.slider("BGM volume (leave narration clear)", 0.05, 0.30, 0.15, 0.01)
     st.text_area("AI music prompt", value=BGM_PROMPT, height=110, disabled=True)
 
+    visual_ready = bool(
+        len(material_paths) == 5
+        if visual_source == "FreeVideo (automatic)"
+        else uploads and len(uploads) == 5
+    )
     ready = bool(
-        uploads and len(uploads) == 5 and (bgm_type != "custom" or bgm_upload is not None)
+        visual_ready and (bgm_type != "custom" or bgm_upload is not None)
     )
     if st.button(
         "🚀 Assemble final Telugu Short",
@@ -260,16 +355,22 @@ if plan:
         use_container_width=True,
     ):
         with st.spinner(
-            "Validating clips, stripping Flow audio, and starting the final render…"
+            "Validating clips, preparing clean visuals, and starting the final render…"
         ):
             try:
-                material_paths = [
-                    _save_uploaded_clip(item, index)
-                    for index, item in enumerate(uploads, start=1)
-                ]
+                if visual_source == "FreeVideo (automatic)":
+                    prepared_paths = [
+                        _prepare_generated_clip(path, index)
+                        for index, path in enumerate(material_paths, start=1)
+                    ]
+                else:
+                    prepared_paths = [
+                        _save_uploaded_clip(item, index)
+                        for index, item in enumerate(uploads, start=1)
+                    ]
                 materials = [
                     MaterialInfo(provider="local", url=file_path, duration=10)
-                    for file_path in material_paths
+                    for file_path in prepared_paths
                 ]
                 bgm_file = ""
                 if bgm_type == "custom":
