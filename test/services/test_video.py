@@ -2113,5 +2113,55 @@ class TestMaterialResolutionTolerance(unittest.TestCase):
         self.assertFalse(vd.is_material_resolution_acceptable(320, 240))
 
 
+class TestFFmpegVideoClipTranscode(unittest.TestCase):
+    def test_transcodes_silent_clip_to_portrait_canvas(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = os.path.join(temp_dir, "source.mp4")
+            output_path = os.path.join(temp_dir, "normalized.mp4")
+            subprocess.run(
+                [
+                    utils.get_ffmpeg_binary(),
+                    "-y",
+                    "-nostdin",
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:s=360x640:r=24:d=0.5",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=440:sample_rate=44100:duration=0.5",
+                    "-shortest",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "aac",
+                    source_path,
+                ],
+                check=True,
+                timeout=60,
+            )
+
+            vd._transcode_video_clip_with_ffmpeg(
+                source_path,
+                output_path,
+                start_time=0,
+                duration=0.5,
+                target_width=480,
+                target_height=854,
+                fit_mode="cover",
+                fps=24,
+            )
+
+            with VideoFileClip(output_path) as clip:
+                self.assertEqual(tuple(clip.size), (480, 854))
+                self.assertIsNone(clip.audio)
+                self.assertAlmostEqual(clip.duration, 0.5, delta=0.1)
+
+
 if __name__ == "__main__":
     unittest.main()
