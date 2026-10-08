@@ -1168,9 +1168,10 @@ def combine_videos(
                         fit_mode=fit_mode,
                         fps=fps,
                     )
+                    normalized_clip_file = clip_file
                     clip_file = None
                     return SubClippedVideoClip(
-                        file_path=clip_file,
+                        file_path=normalized_clip_file,
                         duration=fast_duration,
                         width=video_width,
                         height=video_height,
