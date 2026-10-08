@@ -1633,6 +1633,183 @@ def subtitle_font_supports_text(font_path: str, text: str) -> bool:
     return _subtitle_font_supports_sample(font_path, sample)
 
 
+def _try_generate_video_with_low_memory_ffmpeg(
+    video_path: str,
+    audio_path: str,
+    subtitle_path: str,
+    output_file: str,
+    params: VideoParams,
+    font_path: str,
+    bgm_file_override: str | None = None,
+) -> bool | None:
+    """Render the Factory's standard portrait subtitle/audio mix without MoviePy frames.
+
+    Return None when this configuration is outside the supported fast path or FFmpeg
+    fails, allowing the established MoviePy renderer to handle other workflows.
+    """
+    try:
+        if (
+            os.name == "nt"
+            or VideoAspect(params.video_aspect) != VideoAspect.portrait
+            or not params.subtitle_enabled
+            or not subtitle_path
+            or not os.path.isfile(subtitle_path)
+            or os.path.basename(font_path) not in {
+                "NotoSansTelugu-Regular.ttf",
+                "NotoSansTelugu-Bold.ttf",
+            }
+            or params.subtitle_position != "bottom"
+            or params.subtitle_display_mode != "sentence"
+            or getattr(params, "subtitle_animation", "none") != "none"
+            or params.text_fore_color != "#FFFFFF"
+            or params.stroke_color != "#000000"
+            or params.text_background_color not in (False, None, "")
+            or bool(getattr(params, "rounded_subtitle_background", False))
+            or params.font_size < 32
+            or not os.path.isfile(video_path)
+            or not os.path.isfile(audio_path)
+        ):
+            return None
+
+        bgm_enabled = bgm_service.should_use_bgm(
+            params.bgm_type, params.bgm_volume
+        )
+        bgm_file = ""
+        if bgm_enabled:
+            bgm_file = (
+                bgm_file_override
+                if bgm_file_override is not None
+                else get_bgm_file(
+                    bgm_type=params.bgm_type,
+                    bgm_file=params.bgm_file,
+                )
+            )
+            if not bgm_file or not os.path.isfile(bgm_file):
+                return None
+
+        ffmpeg_binary = utils.get_ffmpeg_binary()
+        if not ffmpeg_binary:
+            return None
+
+        def escape_filter_path(value: str) -> str:
+            return (
+                os.path.abspath(value)
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace(":", "\\:")
+                .replace(",", "\\,")
+            )
+
+        subtitle_filter = (
+            "subtitles=filename='"
+            + escape_filter_path(subtitle_path)
+            + "':fontsdir='"
+            + escape_filter_path(os.path.dirname(os.path.abspath(font_path)))
+            + "':force_style='FontName=Noto Sans Telugu,FontSize="
+            + str(max(1, int(round(params.font_size * 384 / 1080))))
+            + ",PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline="
+            + str(max(0, int(round(params.stroke_width * 384 / 1080))))
+            + ",Shadow=0,Alignment=2,MarginV=14'"
+        )
+        command = [
+            ffmpeg_binary,
+            "-y",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-filter_threads",
+            "1",
+            "-filter_complex_threads",
+            "1",
+            "-i",
+            video_path,
+            "-i",
+            audio_path,
+        ]
+        if bgm_file:
+            if bgm_file_override is None:
+                command.extend(["-stream_loop", "-1"])
+            command.extend(["-i", bgm_file])
+            audio_filter = (
+                f"[1:a]volume={float(params.voice_volume):.4f}[voice];"
+                f"[2:a]volume={float(params.bgm_volume):.4f},"
+                "afade=t=out:st=47:d=3[bgm];"
+                "[voice][bgm]amix=inputs=2:duration=first:"
+                "dropout_transition=0:normalize=0[aout]"
+            )
+        else:
+            audio_filter = f"[1:a]volume={float(params.voice_volume):.4f}[aout]"
+
+        command.extend(
+            [
+                "-filter_complex",
+                f"[0:v]{subtitle_filter}[vout];{audio_filter}",
+                "-map",
+                "[vout]",
+                "-map",
+                "[aout]",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "20",
+                "-threads:v",
+                "1",
+                "-r",
+                str(fps),
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                audio_codec,
+                "-b:a",
+                audio_bitrate,
+                "-ar",
+                "44100",
+                "-shortest",
+                "-movflags",
+                "+faststart",
+                output_file,
+            ]
+        )
+
+        output_dir = os.path.dirname(os.path.abspath(output_file))
+        os.makedirs(output_dir, exist_ok=True)
+        descriptor, temporary_output = tempfile.mkstemp(
+            prefix=".final-ffmpeg-",
+            suffix=".mp4",
+            dir=output_dir,
+        )
+        os.close(descriptor)
+        command[-1] = temporary_output
+        try:
+            with _stage_heartbeat("low-memory FFmpeg final render"):
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    check=False,
+                    timeout=3600,
+                )
+            if result.returncode != 0 or not os.path.isfile(temporary_output):
+                logger.warning(
+                    "low-memory FFmpeg final render failed; using MoviePy fallback: "
+                    + (result.stderr[-2000:] if result.stderr else "unknown FFmpeg error")
+                )
+                return None
+            os.replace(temporary_output, output_file)
+            logger.info("low-memory FFmpeg final render completed")
+            return True
+        finally:
+            delete_files(temporary_output)
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        logger.warning(f"low-memory FFmpeg final render unavailable: {str(exc)}")
+        return None
+
+
 def generate_video(
     video_path: str,
     audio_path: str,
@@ -1676,6 +1853,18 @@ def generate_video(
             font_path = font_path.replace("\\", "/")
 
         logger.info(f"  ⑤ font: {font_path}")
+
+    fast_render_result = _try_generate_video_with_low_memory_ffmpeg(
+        video_path=video_path,
+        audio_path=audio_path,
+        subtitle_path=subtitle_path,
+        output_file=output_file,
+        params=params,
+        font_path=font_path,
+        bgm_file_override=bgm_file_override,
+    )
+    if fast_render_result is not None:
+        return fast_render_result
 
     def resolve_subtitle_background_color():
         # 兼容历史参数：API 里 `text_background_color` 既可能是布尔值，
