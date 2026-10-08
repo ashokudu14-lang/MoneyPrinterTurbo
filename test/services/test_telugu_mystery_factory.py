@@ -44,7 +44,6 @@ def test_scene_prompts_are_five_continuity_locked_ten_second_clips():
     assert "already rising and moving forward" in prompts[4]
 
 
-
 def test_strip_video_audio_upscales_360p_flow_clip(tmp_path):
     source_path = tmp_path / "flow-360p.mp4"
     output_path = tmp_path / "flow-360p-video-only.mp4"
