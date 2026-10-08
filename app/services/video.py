@@ -1782,6 +1782,7 @@ def _try_generate_video_with_low_memory_ffmpeg(
             dir=output_dir,
         )
         os.close(descriptor)
+        command[-1] = temporary_output
         try:
             with _stage_heartbeat("low-memory FFmpeg final render"):
                 result = subprocess.run(
