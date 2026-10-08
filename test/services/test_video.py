@@ -518,6 +518,54 @@ class TestVideoService(unittest.TestCase):
                 else:
                     audio_loop.assert_not_called()
 
+    def test_low_memory_ffmpeg_uses_low_lookahead_encoder_settings(self):
+        """The 1080p Factory export must stay within Render's small memory limit."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            video = Path(temp_dir) / "combined.mp4"
+            audio = Path(temp_dir) / "voice.mp3"
+            subtitle = Path(temp_dir) / "subtitle.srt"
+            bgm = Path(temp_dir) / "bgm.mp3"
+            output = Path(temp_dir) / "final.mp4"
+            for path in (video, audio, subtitle, bgm):
+                path.write_bytes(b"fixture")
+
+            params = vd.VideoParams(
+                video_subject="Kuldhara",
+                font_name="NotoSansTelugu-Regular.ttf",
+                font_size=54,
+                bgm_type="custom",
+                bgm_volume=0.15,
+            )
+
+            def fake_ffmpeg(command, **_kwargs):
+                Path(command[-1]).write_bytes(b"rendered")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            with (
+                patch.object(vd.utils, "get_ffmpeg_binary", return_value="ffmpeg"),
+                patch.object(vd.bgm_service, "should_use_bgm", return_value=True),
+                patch.object(vd.subprocess, "run", side_effect=fake_ffmpeg) as run,
+            ):
+                result = vd._try_generate_video_with_low_memory_ffmpeg(
+                    str(video),
+                    str(audio),
+                    str(subtitle),
+                    str(output),
+                    params,
+                    str(Path(temp_dir) / "NotoSansTelugu-Regular.ttf"),
+                    bgm_file_override=str(bgm),
+                )
+
+            self.assertTrue(result)
+            command = run.call_args.args[0]
+            self.assertIn("ultrafast", command)
+            self.assertIn("zerolatency", command)
+            self.assertIn(
+                "rc-lookahead=0:sync-lookahead=0:bframes=0:ref=1",
+                command,
+            )
+            self.assertTrue(output.is_file())
+
     def test_preprocess_video(self):
         if not os.path.exists(self.test_img_path):
             self.fail(f"test image not found: {self.test_img_path}")
