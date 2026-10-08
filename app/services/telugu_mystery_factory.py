@@ -339,8 +339,17 @@ def find_telugu_font(font_dir: str | Path) -> str | None:
 
 
 def strip_video_audio(source_path: str, output_path: str) -> str:
-    """Create a video-only copy so Flow audio cannot leak into the final mix."""
+    """Remove Flow audio and meet the renderer's 480 px minimum dimension.
+
+    Flow's available-credit 360p exports are 360x640, below the local-material
+    renderer's minimum accepted short side. Upscale only undersized inputs to a
+    480 px short side; preserve dimensions for larger clips.
+    """
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    scale_filter = (
+        "scale=w='if(lt(min(iw,ih),480),if(lt(iw,ih),480,-2),iw)':"
+        "h='if(lt(min(iw,ih),480),if(lt(iw,ih),-2,480),ih)'"
+    )
     command = [
         utils.get_ffmpeg_binary(),
         "-y",
@@ -351,41 +360,23 @@ def strip_video_audio(source_path: str, output_path: str) -> str:
         source_path,
         "-map",
         "0:v:0",
+        "-vf",
+        scale_filter,
         "-c:v",
-        "copy",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
         "-an",
         "-movflags",
         "+faststart",
         output_path,
     ]
-    completed = subprocess.run(command, capture_output=True, check=False, timeout=120)
-    if completed.returncode != 0:
-        command = [
-            utils.get_ffmpeg_binary(),
-            "-y",
-            "-nostdin",
-            "-v",
-            "error",
-            "-i",
-            source_path,
-            "-map",
-            "0:v:0",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "medium",
-            "-crf",
-            "18",
-            "-pix_fmt",
-            "yuv420p",
-            "-an",
-            "-movflags",
-            "+faststart",
-            output_path,
-        ]
-        completed = subprocess.run(command, capture_output=True, check=False, timeout=240)
-
-    if completed.returncode != 0 or not os.path.isfile(output_path):
+    completed = subprocess.run(command, capture_output=True, check=False, timeout=240)
+    if completed.returncode != 0 or not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
         detail = completed.stderr.decode("utf-8", errors="replace")[-1000:]
-        raise RuntimeError(f"Could not remove source audio from Flow clip: {detail}")
+        raise RuntimeError(f"Could not prepare Flow clip for rendering: {detail}")
     return output_path
