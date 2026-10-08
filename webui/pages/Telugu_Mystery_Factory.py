@@ -44,6 +44,16 @@ st.caption(
     "Google Flow visuals → one continuous Telugu voice/BGM/subtitle mix in MoneyPrinterTurbo"
 )
 
+KULDHARA_DEFAULT_NARRATION = """రాజస్థాన్‌లో జైసల్మేర్‌కు దగ్గరగా ఉన్న కుల్ధారా—ఇప్పుడు నిశ్శబ్దంగా కనిపించే శిథిల గ్రామం. కానీ ఈ ఖాళీ ఇళ్లకంటే, ఊరంతా ఎందుకు వెళ్లిపోయిందన్న ప్రశ్నే ఎక్కువ ఆసక్తి రేపుతుంది.
+
+ఇక్కడ పాళీవాల్ బ్రాహ్మణుల నివాసం ఉండేది. గ్రామం ఎప్పుడు, ఎందుకు ఖాళీ అయిందో చెప్పే పూర్తి ఆధారాలు స్పష్టంగా లేవు. నీటి కొరత, జీవన పరిస్థితులు వంటి కారణాలూ చర్చలో ఉన్నాయి.
+
+ప్రసిద్ధ స్థానిక కథనం ప్రకారం, దివాన్ సలీం సింగ్ గ్రామ పెద్ద కుమార్తెను బలవంతంగా పెళ్లి చేసుకోవాలనుకున్నాడట. ఆమెను కాపాడేందుకు కుల్ధారాతో పాటు పరిసర గ్రామాలవారు రాత్రికి రాత్రే వెళ్లిపోయారట.
+
+అయితే ఇది నిర్ధారిత చరిత్ర కాదు. ఒక శాస్త్రీయ అధ్యయనం, అక్కడి కూలిన నిర్మాణాల్లో భూకంప నష్టానికి సరిపోయే సూచనలు ఉన్నాయని ప్రతిపాదించింది. అది కూడా వలసకు తుది సమాధానం కాదు.
+
+అందుకే కుల్ధారా మిస్టరీ ఇంకా మిగిలింది: ఒత్తిడా, ప్రకృతి వైపరీత్యమా, లేక మారిన జీవన పరిస్థితులా? మీకు ఏ వివరణ నమ్మదగినదిగా అనిపిస్తోంది?"""
+
 font_dir = root_dir / "resource" / "fonts"
 
 
@@ -108,8 +118,16 @@ if generate_clicked:
             try:
                 plan = build_plan(topic.strip())
             except Exception as exc:
-                st.error(f"Could not generate the plan: {exc}")
-            else:
+                is_kuldhara = "kuldhara" in topic.casefold() or "కుల్ధర" in topic
+                if not is_kuldhara:
+                    st.error(f"Could not generate the plan: {exc}")
+                    plan = None
+                else:
+                    plan = build_plan(topic.strip(), narration=KULDHARA_DEFAULT_NARRATION)
+                    st.info(
+                        "LLM access is not configured, so the factory used its included, uncertainty-labeled Kuldhara narration. You can edit it below."
+                    )
+            if plan is not None:
                 st.session_state["telugu_mystery_topic"] = topic.strip()
                 st.session_state["telugu_mystery_plan"] = plan
                 st.success(
