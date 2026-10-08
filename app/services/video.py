@@ -624,6 +624,7 @@ def concat_video_clips_with_ffmpeg(
     threads: int,
     output_dir: str,
     max_duration: float | None = None,
+    copy_video: bool = False,
 ):
     # Separate renders may share a directory. Each FFmpeg process must keep its
     # own manifest until all codec attempts finish, without overwriting or
@@ -654,15 +655,22 @@ def concat_video_clips_with_ffmpeg(
             "0",
             "-i",
             concat_list_file,
-            "-c:v",
-            codec,
-            "-threads",
-            str(threads or 2),
-            "-vf",
-            _BT709_VIDEO_FILTER,
-            "-pix_fmt",
-            "yuv420p",
         ]
+        if copy_video:
+            command.extend(["-c:v", "copy", "-movflags", "+faststart"])
+        else:
+            command.extend(
+                [
+                    "-c:v",
+                    codec,
+                    "-threads",
+                    str(threads or 2),
+                    "-vf",
+                    _BT709_VIDEO_FILTER,
+                    "-pix_fmt",
+                    "yuv420p",
+                ]
+            )
         if max_duration is not None and max_duration > 0:
             command.extend(["-t", f"{max_duration:.3f}"])
         command.append(staged_output)
@@ -670,8 +678,8 @@ def concat_video_clips_with_ffmpeg(
 
     def run_concat(codec: str):
         command = build_command(codec)
-        # 使用 ffmpeg 只做一次串联与编码，避免 MoviePy 逐段合并时反复重编码，
-        # 从而降低画质劣化与颜色偏移风险。阻塞等待期间由心跳日志体现任务仍在运行。
+        # 已规范化的短片直接流复制；其他素材由 FFmpeg 一次拼接编码，避免
+        # MoviePy 逐段合并带来的内存峰值。阻塞期间由心跳日志体现任务仍在运行。
         result = _run_concat_with_heartbeat(command, staged_output)
         if result.returncode != 0:
             error_message = (result.stderr or result.stdout or "").strip()
@@ -685,18 +693,21 @@ def concat_video_clips_with_ffmpeg(
             dir=os.path.dirname(os.path.abspath(output_file)),
         )
         os.close(descriptor)
-        effective_codec = _get_effective_video_codec()
-        try:
-            result_codec = run_concat(effective_codec)
-        except TimeoutError:
-            # A hung encoder is not evidence that another codec will work. Do
-            # not spend a second timeout period retrying the same input.
-            raise
-        except Exception as exc:
-            if effective_codec == _DEFAULT_VIDEO_CODEC:
+        if copy_video:
+            result_codec = run_concat("copy")
+        else:
+            effective_codec = _get_effective_video_codec()
+            try:
+                result_codec = run_concat(effective_codec)
+            except TimeoutError:
+                # A hung encoder is not evidence that another codec will work. Do
+                # not spend a second timeout period retrying the same input.
                 raise
-            result_codec = run_concat(_DEFAULT_VIDEO_CODEC)
-            _disable_runtime_video_codec(effective_codec, str(exc))
+            except Exception as exc:
+                if effective_codec == _DEFAULT_VIDEO_CODEC:
+                    raise
+                result_codec = run_concat(_DEFAULT_VIDEO_CODEC)
+                _disable_runtime_video_codec(effective_codec, str(exc))
         # Failed attempts and in-progress output stay private until FFmpeg has
         # finished. Publication errors must not trigger another codec attempt.
         if os.path.getsize(staged_output) == 0:
@@ -1152,7 +1163,7 @@ def combine_videos(
                 )
                 with tempfile.NamedTemporaryFile(
                     dir=output_dir or ".",
-                    prefix="temp-clip-",
+                    prefix="temp-ffmpeg-clip-",
                     suffix=".mp4",
                     delete=False,
                 ) as temporary_clip:
@@ -1355,12 +1366,17 @@ def combine_videos(
     clip_files = [clip.file_path for clip in processed_clips]
     logger.info(f"concatenating {len(clip_files)} clips with ffmpeg")
     try:
+        copy_normalized_clips = all(
+            os.path.basename(clip.file_path).startswith("temp-ffmpeg-clip-")
+            for clip in processed_clips
+        )
         concat_video_clips_with_ffmpeg(
             clip_files=clip_files,
             output_file=combined_video_path,
             threads=threads,
             output_dir=output_dir,
             max_duration=audio_duration,
+            copy_video=copy_normalized_clips,
         )
         if used_video_paths is not None:
             # Exclude safety-margin clips that FFmpeg trims entirely from the output.
